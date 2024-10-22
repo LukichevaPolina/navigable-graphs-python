@@ -5,6 +5,7 @@ import time
 import random
 from math import log2
 from heapq import heapify, heappop, heappush, heapreplace, nlargest, nsmallest
+import scipy.spatial.distance as ds
 
 def l2_distance(a, b):
     return np.linalg.norm(a - b)
@@ -20,11 +21,37 @@ def heuristic(candidates, curr, k, distance_func, data):
             result.append( (c, curr_dist))
             result_indx_set.add(c)
             added_data.append(c_data)
-    for c, curr_dist in candidates: # optional. uncomment to build neighborhood exactly with k elements.
+    for c, curr_dist in candidates[:k]: # optional. uncomment to build neighborhood exactly with k elements.
         if len(result) < k and (c not in result_indx_set):
             result.append( (c, curr_dist) )
     
     return result
+
+# def heuristic(candidates, curr, k, distance_func, data):
+#     candidates = sorted(candidates, key=lambda a: a[1])
+#     result_indx_set = {candidates[0][0]}
+#     result = [candidates[0]]
+#     added_data = [data[candidates[0][0]]]
+    
+#     for c, curr_dist in candidates[1:]:
+#         c_data = data[c]
+#         if curr_dist < min(map(lambda a: distance_func(c_data, a), added_data)):
+#             result.append((c, curr_dist))
+#             result_indx_set.add(c)
+#             added_data.append(c_data)
+#         elif len(result) < k and c not in result_indx_set:
+#             # Добавляем с учетом весов или других условий
+#             if curr_dist < min(distance_func(c_data, a) for a in added_data):  # Определите свой порог
+#                 result.append((c, curr_dist))
+    
+#     # Дополнительная логика для выбора соседей
+#     while len(result) < k and candidates:
+#         c, curr_dist = candidates.pop(0)
+#         if c not in result_indx_set:
+#             result.append((c, curr_dist))
+
+#     return result
+
 def k_closest(candidates: list, curr, k, distance_func, data):
     return sorted(candidates, key=lambda a: a[1])[:k]
     
@@ -54,7 +81,7 @@ class HNSW:
         self._ef = ef
         self._ef_construction = ef_construction
         self._m0 = 2 * m if m0 is None else m0
-        self._level_mult = 1 / log2(m)
+        self._level_mult = 1 / log2(m) + 1
         self._graphs = []
         self._enter_point = None
 
@@ -69,8 +96,20 @@ class HNSW:
         point = self._enter_point
         m = self._m
 
+        # if len(self.data) > 0:
+        #     # print(self.data)
+        #     median_elem = np.mean(self.data)
+        #     # Теперь выбираем стартовую точку по близости к медиане
+        #     start_point = np.argmin([self.distance(median_elem, e) for e in self.data])
+        #     print(start_point)
+        # else:
+        #     start_point = None  # Если данных еще нет
+
+        # point = self._enter_point if start_point is None else start_point
         # level at which the element will be inserted
+        # print(int(-log2(random.random()) * self._level_mult) + 1)
         level = int(-log2(random.random()) * self._level_mult) + 1
+        # level = 1
         # print("level: %d" % level)
 
         # elem will be at data[idx]
@@ -92,7 +131,7 @@ class HNSW:
                 # navigate the graph and update ep with the closest
                 # nodes we find
                 # ep = self._search_graph(elem, ep, layer, ef)
-                candidates = self.beam_search(graph=layer, q=elem, k=level_m*2, eps=[point], ef=self._ef_construction)
+                candidates = self.beam_search(graph=layer, q=elem, k=level_m * 2, eps=[point], ef=self._ef_construction)
                 point = candidates[0][0]
                 
                 # insert in g[idx] the best neighbors
@@ -168,6 +207,7 @@ class HNSW:
             visited.add(current_vertex)
 
             # Check the neighbors of the current vertex
+            # print("HELLO")
             for neighbor, _ in graph[current_vertex]:
                 if neighbor not in observed:
                     dist = self.distance_func(q, self.data[neighbor])                    
@@ -185,6 +225,7 @@ class HNSW:
         if return_observed:
             return observed_sorted
         return observed_sorted[:k]
+
     def save_graph_plane(self, file_path):
         with open(file_path, "w") as f:
             f.write(f'{len(self.data)}\n')
@@ -198,7 +239,32 @@ class HNSW:
                     for dst, dist in neighborhood: 
                         f.write(f'{src} {dst}\n')
 
+    def count_connected_components(self):
+       
+        components = []
 
+        def dfs(node, level):
+            stack = [node]
+            while stack:
+                current = stack.pop()
+                for neighbor, _ in self._graphs[level].get(current, []):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+
+        for idx, level in enumerate(self._graphs[::-1]):
+            visited = set()
+            component_count = 0
+            nodes = (level.keys())
+            for node in nodes:
+                if node not in visited:
+                    visited.add(node)
+                    component_count += 1
+                    dfs(node, idx)
+
+            components.append(component_count)
+
+        return components
 
 # n = int(sys.argv[1]) # graph size
 # dim = int(sys.argv[2]) # vector dimensionality
